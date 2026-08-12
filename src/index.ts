@@ -13,9 +13,24 @@ import {
   type CompanionVariableDefinitions,
   type SomeCompanionConfigField,
 } from '@companion-module/base'
+import { readFile, writeFile } from 'node:fs/promises'
 import { TurtleApi } from './api.js'
 import { normalizeDevice } from './normalize.js'
 import type { DanteDevice, TurtleConfig } from './types.js'
+
+const CACHE_VERSION = 1
+const CACHE_FILE_URL = new URL('../turtle-dante-cache.json', import.meta.url)
+const REFRESH_ICON_URL = new URL('../assets/icon-refresh.png', import.meta.url)
+const DEVICE_ICON_URL = new URL('../assets/icon-device.png', import.meta.url)
+
+async function loadIconPng64(url: URL): Promise<string> {
+  try {
+    const file = await readFile(url)
+    return file.toString('base64')
+  } catch {
+    return ''
+  }
+}
 
 interface Types {
   config: TurtleConfig
@@ -41,10 +56,16 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
   private polling = false
   private devices = new Map<string, DanteDevice>()
   private controllerOnline = false
+  private refreshIconPng64 = ''
+  private deviceIconPng64 = ''
+  private lastPersistedCache = ''
 
   public async init(config: TurtleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
     this.config = config
+    await this.loadAssets()
+    await this.loadCache()
     this.defineStaticCapabilities()
+    this.updateVariables()
     await this.start()
   }
 
@@ -55,7 +76,47 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
 
   public async destroy(): Promise<void> {
     this.stopPolling()
+    await this.persistCache()
     this.api = undefined
+  }
+
+  private async loadAssets(): Promise<void> {
+    if (!this.refreshIconPng64) this.refreshIconPng64 = await loadIconPng64(REFRESH_ICON_URL)
+    if (!this.deviceIconPng64) this.deviceIconPng64 = await loadIconPng64(DEVICE_ICON_URL)
+  }
+
+  private async loadCache(): Promise<void> {
+    try {
+      const raw = await readFile(CACHE_FILE_URL, 'utf8')
+      const parsed = JSON.parse(raw) as { version?: number; devices?: DanteDevice[] }
+      if (parsed.version !== CACHE_VERSION || !Array.isArray(parsed.devices)) return
+
+      this.devices = new Map(
+        parsed.devices
+          .filter((device) => device && typeof device.id === 'string')
+          .map((device) => [device.id, { ...device, online: false }]),
+      )
+      this.lastPersistedCache = JSON.stringify(parsed)
+    } catch {
+      // No cache file on first run is expected.
+    }
+  }
+
+  private async persistCache(): Promise<void> {
+    const payload = {
+      version: CACHE_VERSION,
+      updatedAt: new Date().toISOString(),
+      devices: [...this.devices.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    }
+    const serialized = JSON.stringify(payload, null, 2)
+    if (serialized === this.lastPersistedCache) return
+
+    try {
+      await writeFile(CACHE_FILE_URL, serialized, 'utf8')
+      this.lastPersistedCache = serialized
+    } catch (error) {
+      this.log('warn', `Unable to persist Turtle Dante cache: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   private async start(): Promise<void> {
@@ -90,6 +151,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
       }
 
       this.updateStatus(InstanceStatus.Ok, `${this.onlineCount()} Dante device${this.onlineCount() === 1 ? '' : 's'} online`)
+      await this.persistCache()
       this.refreshDynamicDefinitions()
       this.updateVariables()
       this.checkAllFeedbacks()
@@ -441,11 +503,13 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
         type: 'simple',
         name: 'Refresh Dante inventory',
         style: {
-          text: '↻\nREFRESH',
-          size: 18,
+          text: 'Refresh',
+          size: 'auto',
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(0, 105, 170),
-          alignment: 'center:center',
+          alignment: 'center:bottom',
+          png64: this.refreshIconPng64 || undefined,
+          pngalignment: 'center:top',
         },
         steps: [
           {
@@ -462,11 +526,13 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
         type: 'simple',
         name: `${device.name} device status`,
         style: {
-          text: `●\n${device.name}`,
-          size: 18,
+          text: device.name,
+          size: 'auto',
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(90, 90, 90),
-          alignment: 'center:center',
+          alignment: 'center:bottom',
+          png64: this.deviceIconPng64 || undefined,
+          pngalignment: 'center:top',
         },
         steps: [
           {
@@ -479,7 +545,6 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
             feedbackId: 'deviceOnlineState',
             options: { device: device.id, state: 'online' },
             style: {
-              text: `●\n${device.name}`,
               bgcolor: combineRgb(0, 160, 0),
               color: combineRgb(255, 255, 255),
             },
@@ -488,7 +553,6 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
             feedbackId: 'deviceOnlineState',
             options: { device: device.id, state: 'offline' },
             style: {
-              text: `○\n${device.name}`,
               bgcolor: combineRgb(160, 0, 0),
               color: combineRgb(255, 255, 255),
             },

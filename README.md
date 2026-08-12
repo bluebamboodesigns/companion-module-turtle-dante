@@ -1,6 +1,6 @@
 # Bitfocus Companion - Turtle Dante Controller
 
-Early-stage Companion connection module for Turtle Dante controller web interfaces.
+Bitfocus Companion connection module for Turtle Dante controller web interfaces.
 
 ## Current functionality
 
@@ -8,14 +8,16 @@ Early-stage Companion connection module for Turtle Dante controller web interfac
 - Optionally accept self-signed/invalid HTTPS certificates.
 - Poll `getjson.cgi?json=dante` for Dante inventory.
 - Identify devices by MAC address rather than device name.
-- Preserve discovered devices in a runtime cache when they disappear from the Turtle API and mark them `OFFLINE`.
+- Preserve discovered devices in a persistent cache when they disappear from the Turtle API and mark them `OFFLINE`.
 - Discover RX and TX channels independently, including stereo/multichannel devices.
 - Expose device information as Companion variables.
 - Expose clock source and clock synchronization status.
 - Expose RX latency information in microseconds.
 - Expose device mute status when supplied by the Dante API.
-- Provide device online/offline, clock, mute, route/source, and destination-status feedbacks.
+- Provide grouped device-state feedbacks for online status, clock status, and mute status.
+- Provide route-aware feedbacks for destination RX source match and destination RX status match using discovered channel references.
 - Provide a refresh action.
+- Provide Companion presets for refresh and per-device status buttons with image icons.
 - Provide the known Dante routing SET command:
   `SET DANTE DEV <destination> AUDIO RXCHN <rx-channel> SOURCE <source> CHN <source-channel>`.
 
@@ -31,8 +33,6 @@ The supplied Turtle API information currently gives us a reliable read/monitorin
 - RX latency control.
 - Clock source/control.
 - Additional Dante device configuration.
-- Persistent cache storage across Companion restarts.
-
 The module architecture keeps these possibilities open, but they are deliberately not exposed as fake actions until the Turtle command syntax is confirmed.
 
 ## Offline-device behavior
@@ -41,13 +41,25 @@ A device is keyed internally by normalized primary MAC address. If the device is
 
 This is important because changing a Dante device name should not break Companion button configurations.
 
+The cache is persisted to `turtle-dante-cache.json` in the module root, so offline devices and discovered channel relationships survive a Companion restart.
+
 ## HTTPS
 
 The Turtle controller may use a self-signed or otherwise non-public certificate. HTTPS is supported with certificate verification disabled by default. Certificate verification can be enabled if the controller has a trusted certificate.
 
-## Known caveat in this first build
+## Feedbacks
 
-Companion's dynamic option definitions are refreshed after discovery. The initial implementation focuses on getting the inventory/state model correct. The route action currently uses discovered device choices, while channel dropdown population will be refined as the module is tested against Companion's current dynamic-option behavior.
+The module exposes five feedbacks:
+
+- `Dante device online status`
+- `Dante device clock status`
+- `Dante device mute status`
+- `Destination RX source matches`
+- `Destination RX status matches`
+
+The route-aware feedbacks use the same discovered TX/RX channel references as the route action. Stored selections are based on stable device identity plus channel number, so renaming a Dante device or channel does not break the feedback configuration.
+
+`Destination RX status matches` compares the selected RX channel's current `status` value from the Turtle API to the expected status string chosen in the feedback.
 
 ## API endpoints currently used
 
