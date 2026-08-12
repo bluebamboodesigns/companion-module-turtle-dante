@@ -1,0 +1,27 @@
+{
+  "$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+  "type": "connection",
+  "id": "turtle-dante",
+  "name": "Turtle Dante Controller",
+  "shortname": "Turtle Dante",
+  "description": "Monitor Turtle Dante controller devices and routes, with dynamic device/channel discovery and offline caching.",
+  "repository": "",
+  "bugs": "",
+  "maintainers": [
+    {
+      "name": "Matthew Rigdon"
+    }
+  ],
+  "legacyIds": [],
+  "manufacturer": "Turtle",
+  "products": ["Dante Controller"],
+  "keywords": ["Dante", "audio", "routing", "AES67", "Turtle"],
+  "version": "0.0.0",
+  "license": "MIT",
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "0.0.0",
+    "entrypoint": "../dist/index.js"
+  }
+}
