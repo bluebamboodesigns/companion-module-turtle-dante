@@ -546,7 +546,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
         name: 'Refresh Dante inventory',
         style: {
           text: 'Refresh',
-          size: 'auto',
+          size: 20,
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(0, 105, 170),
           alignment: 'center:bottom',
@@ -569,7 +569,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
         name: `${device.name} device status`,
         style: {
           text: device.name,
-          size: 'auto',
+          size: 20,
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(90, 90, 90),
           alignment: 'center:bottom',
