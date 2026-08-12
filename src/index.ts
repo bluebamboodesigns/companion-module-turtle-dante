@@ -13,13 +13,15 @@ import {
   type CompanionVariableDefinitions,
   type SomeCompanionConfigField,
 } from '@companion-module/base'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { TurtleApi } from './api.js'
 import { normalizeDevice } from './normalize.js'
 import type { DanteDevice, TurtleConfig } from './types.js'
 
 const CACHE_VERSION = 1
-const CACHE_FILE_URL = new URL('../turtle-dante-cache.json', import.meta.url)
+const CACHE_FILE_URL = new URL(`file://${join(homedir(), 'Library', 'Application Support', 'companion-module-turtle-dante', 'cache.json')}`)
 const REFRESH_ICON_URL = new URL('../assets/icon-refresh.png', import.meta.url)
 const DEVICE_ICON_URL = new URL('../assets/icon-device.png', import.meta.url)
 
@@ -59,6 +61,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
   private refreshIconPng64 = ''
   private deviceIconPng64 = ''
   private lastPersistedCache = ''
+  private lastDefinitionsSignature = ''
 
   public async init(config: TurtleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
     this.config = config
@@ -96,7 +99,12 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
           .filter((device) => device && typeof device.id === 'string')
           .map((device) => [device.id, { ...device, online: false }]),
       )
-      this.lastPersistedCache = JSON.stringify(parsed)
+      this.lastPersistedCache = JSON.stringify({
+        version: parsed.version,
+        devices: parsed.devices
+          .filter((device) => device && typeof device.id === 'string')
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      })
     } catch {
       // No cache file on first run is expected.
     }
@@ -105,15 +113,16 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
   private async persistCache(): Promise<void> {
     const payload = {
       version: CACHE_VERSION,
-      updatedAt: new Date().toISOString(),
       devices: [...this.devices.values()].sort((a, b) => a.id.localeCompare(b.id)),
     }
-    const serialized = JSON.stringify(payload, null, 2)
-    if (serialized === this.lastPersistedCache) return
+    const signature = JSON.stringify(payload)
+    if (signature === this.lastPersistedCache) return
 
     try {
+      await mkdir(dirname(CACHE_FILE_URL.pathname), { recursive: true })
+      const serialized = JSON.stringify(payload, null, 2)
       await writeFile(CACHE_FILE_URL, serialized, 'utf8')
-      this.lastPersistedCache = serialized
+      this.lastPersistedCache = signature
     } catch (error) {
       this.log('warn', `Unable to persist Turtle Dante cache: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -152,7 +161,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
 
       this.updateStatus(InstanceStatus.Ok, `${this.onlineCount()} Dante device${this.onlineCount() === 1 ? '' : 's'} online`)
       await this.persistCache()
-      this.refreshDynamicDefinitions()
+      this.refreshDynamicDefinitionsIfChanged()
       this.updateVariables()
       this.checkAllFeedbacks()
     } catch (error) {
@@ -182,6 +191,39 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     this.setFeedbackDefinitions(this.buildFeedbacks())
     this.setVariableDefinitions(this.buildVariables())
     this.setPresetDefinitions(this.buildPresetSections(), this.buildPresets())
+  }
+
+  private definitionsSignature(): string {
+    return JSON.stringify(
+      [...this.devices.values()]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((device) => ({
+          id: device.id,
+          name: device.name,
+          online: device.online,
+          clockStatus: device.clockStatus,
+          mute: device.mute,
+          rxChannels: device.rxChannels.map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            status: channel.status,
+            sourceDevice: channel.sourceDevice,
+            sourceChannel: channel.sourceChannel,
+          })),
+          txChannels: device.txChannels.map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+          })),
+        })),
+    )
+  }
+
+  private refreshDynamicDefinitionsIfChanged(): void {
+    const signature = this.definitionsSignature()
+    if (signature === this.lastDefinitionsSignature) return
+
+    this.lastDefinitionsSignature = signature
+    this.refreshDynamicDefinitions()
   }
 
   private deviceChoices(includeOffline = true) {
