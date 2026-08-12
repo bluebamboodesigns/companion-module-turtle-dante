@@ -5,8 +5,8 @@
   "name": "Turtle Dante Controller",
   "shortname": "Turtle Dante",
   "description": "Monitor Turtle Dante controller devices and routes, with dynamic device/channel discovery and offline caching.",
-  "repository": "",
-  "bugs": "",
+  "repository": "https://github.com/bluebamboodesigns/companion-module-turtle-dante",
+  "bugs": "https://github.com/bluebamboodesigns/companion-module-turtle-dante/issues",
   "maintainers": [
     {
       "name": "Matthew Rigdon"
@@ -16,7 +16,7 @@
   "manufacturer": "Turtle",
   "products": ["Dante Controller"],
   "keywords": ["Dante", "audio", "routing", "AES67", "Turtle"],
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "MIT",
   "runtime": {
     "type": "node22",
