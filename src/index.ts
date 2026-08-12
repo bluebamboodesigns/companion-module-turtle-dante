@@ -9,6 +9,7 @@ import {
   type CompanionFeedbackBooleanEvent,
   type CompanionFeedbackSchema,
   type CompanionPresetDefinitions,
+  type CompanionPresetSection,
   type CompanionVariableDefinitions,
   type SomeCompanionConfigField,
 } from '@companion-module/base'
@@ -24,13 +25,11 @@ interface Types {
     refresh: CompanionActionSchemaWithoutResult<Record<string, never>>
   }
   feedbacks: {
-    deviceOnline: CompanionFeedbackSchema<{ device: string }> & { type: 'boolean' }
-    deviceOffline: CompanionFeedbackSchema<{ device: string }> & { type: 'boolean' }
-    deviceClockSynced: CompanionFeedbackSchema<{ device: string }> & { type: 'boolean' }
-    deviceClockUnsynced: CompanionFeedbackSchema<{ device: string }> & { type: 'boolean' }
-    deviceMuted: CompanionFeedbackSchema<{ device: string }> & { type: 'boolean' }
-    destinationSource: CompanionFeedbackSchema<{ device: string; channel: number; sourceDevice: string; sourceChannel: string }> & { type: 'boolean' }
-    destinationStatus: CompanionFeedbackSchema<{ device: string; channel: number; status: string }> & { type: 'boolean' }
+    deviceOnlineState: CompanionFeedbackSchema<{ device: string; state: string }> & { type: 'boolean' }
+    deviceClockState: CompanionFeedbackSchema<{ device: string; state: string }> & { type: 'boolean' }
+    deviceMuteState: CompanionFeedbackSchema<{ device: string; state: string }> & { type: 'boolean' }
+    destinationSource: CompanionFeedbackSchema<{ destination: string; source: string }> & { type: 'boolean' }
+    destinationStatus: CompanionFeedbackSchema<{ destination: string; status: string }> & { type: 'boolean' }
   }
   variables: Record<string, string | number | boolean | undefined>
 }
@@ -113,14 +112,14 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     this.setActionDefinitions(this.buildActions())
     this.setFeedbackDefinitions(this.buildFeedbacks())
     this.setVariableDefinitions(this.buildVariables())
-    this.setPresetDefinitions([], this.buildPresets())
+    this.setPresetDefinitions(this.buildPresetSections(), this.buildPresets())
   }
 
   private refreshDynamicDefinitions(): void {
     this.setActionDefinitions(this.buildActions())
     this.setFeedbackDefinitions(this.buildFeedbacks())
     this.setVariableDefinitions(this.buildVariables())
-    this.setPresetDefinitions([], this.buildPresets())
+    this.setPresetDefinitions(this.buildPresetSections(), this.buildPresets())
   }
 
   private deviceChoices(includeOffline = true) {
@@ -141,6 +140,79 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     }
     return choices
   }
+
+  private statusChoices() {
+    const statuses = new Set<string>(['UNKNOWN', 'STATIC'])
+    for (const device of this.devices.values()) {
+      for (const channel of device.rxChannels) {
+        if (channel.status) statuses.add(channel.status)
+      }
+    }
+
+    return [...statuses]
+      .sort((a, b) => a.localeCompare(b))
+      .map((status) => ({ id: status, label: status }))
+  }
+
+  private parseChannelRef(ref: string): { deviceId: string; channelId: number } | undefined {
+    const [deviceId, channelIdText] = String(ref).split(':')
+    const channelId = Number(channelIdText)
+    if (!deviceId || !Number.isInteger(channelId)) return undefined
+    return { deviceId, channelId }
+  }
+
+  private getChannelRef(direction: 'rx' | 'tx', ref: string): { device: DanteDevice; channel: DanteDevice['rxChannels'][number] } | undefined {
+    const parsed = this.parseChannelRef(ref)
+    if (!parsed) return undefined
+
+    const device = this.devices.get(parsed.deviceId)
+    if (!device) return undefined
+
+    const channels = direction === 'rx' ? device.rxChannels : device.txChannels
+    const channel = channels.find((candidate) => candidate.id === parsed.channelId)
+    if (!channel) return undefined
+
+    return { device, channel }
+  }
+
+  private matchDeviceByName(name: string): DanteDevice | undefined {
+    const trimmed = name.trim()
+    if (!trimmed) return undefined
+
+    return [...this.devices.values()].find((device) => device.name === trimmed)
+      ?? [...this.devices.values()].find((device) => device.name.toLowerCase() === trimmed.toLowerCase())
+  }
+
+  private resolveSourceChannelRef(sourceDeviceName: string, sourceChannelName: string): string | undefined {
+    const device = this.matchDeviceByName(sourceDeviceName)
+    if (!device) return undefined
+
+    const trimmedChannelName = sourceChannelName.trim()
+    const channel = device.txChannels.find((candidate) => {
+      return candidate.name === trimmedChannelName
+        || candidate.name.toLowerCase() === trimmedChannelName.toLowerCase()
+        || String(candidate.id) === trimmedChannelName
+        || `CH ${candidate.id}` === trimmedChannelName.toUpperCase()
+    })
+
+    return channel ? `${device.id}:${channel.id}` : undefined
+  }
+
+  private isResolvedSourceMatch(destinationRef: string, expectedSourceRef: string): boolean {
+    const destination = this.getChannelRef('rx', destinationRef)
+    if (!destination) return false
+
+    const actualSourceRef = this.resolveSourceChannelRef(destination.channel.sourceDevice, destination.channel.sourceChannel)
+    return actualSourceRef === expectedSourceRef
+  }
+
+  private isDestinationStatusMatch(destinationRef: string, expectedStatus: string): boolean {
+    const destination = this.getChannelRef('rx', destinationRef)
+    if (!destination) return false
+
+    return destination.channel.status === expectedStatus
+  }
+
   private buildActions(): CompanionActionDefinitions<Types['actions']> {
     const actions: CompanionActionDefinitions<Types['actions']> = {
       refresh: {
@@ -189,66 +261,103 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
 
   private buildFeedbacks(): CompanionFeedbackDefinitions<Types['feedbacks']> {
     const deviceChoices = this.deviceChoices()
+    const rxChoices = this.allChannelChoices('rx')
+    const txChoices = this.allChannelChoices('tx')
+    const statusChoices = this.statusChoices()
+
     const feedbacks: CompanionFeedbackDefinitions<Types['feedbacks']> = {
-      deviceOnline: {
-        type: 'boolean', name: 'Dante device is online', defaultStyle: { bgcolor: combineRgb(0, 160, 0) },
-        options: [{ type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices }],
-        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceOnline']['options']>) =>
-          this.devices.get(String(event.options.device))?.online === true,
-      },
-      deviceOffline: {
-        type: 'boolean', name: 'Dante device is offline', defaultStyle: { bgcolor: combineRgb(160, 0, 0) },
-        options: [{ type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices }],
-        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceOffline']['options']>) => {
-          const d = this.devices.get(String(event.options.device))
-          return d !== undefined && !d.online
+      deviceOnlineState: {
+        type: 'boolean', name: 'Dante device online status', defaultStyle: { bgcolor: combineRgb(0, 160, 0) },
+        options: [
+          { type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices },
+          {
+            type: 'dropdown',
+            id: 'state',
+            label: 'State',
+            default: 'online',
+            choices: [
+              { id: 'online', label: 'Online' },
+              { id: 'offline', label: 'Offline' },
+            ],
+          },
+        ],
+        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceOnlineState']['options']>) => {
+          const device = this.devices.get(String(event.options.device))
+          if (!device) return false
+          return String(event.options.state) === 'online' ? device.online : !device.online
         },
       },
-      deviceClockSynced: {
-        type: 'boolean', name: 'Dante device clock is synced', defaultStyle: { bgcolor: combineRgb(0, 160, 0) },
-        options: [{ type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices }],
-        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceClockSynced']['options']>) =>
-          this.devices.get(String(event.options.device))?.clockStatus === 'SYNC',
-      },
-      deviceClockUnsynced: {
-        type: 'boolean', name: 'Dante device clock is not synced', defaultStyle: { bgcolor: combineRgb(160, 0, 0) },
-        options: [{ type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices }],
-        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceClockUnsynced']['options']>) => {
-          const d = this.devices.get(String(event.options.device))
-          return d !== undefined && d.online && d.clockStatus !== 'SYNC'
+      deviceClockState: {
+        type: 'boolean', name: 'Dante device clock status', defaultStyle: { bgcolor: combineRgb(0, 160, 0) },
+        options: [
+          { type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices },
+          {
+            type: 'dropdown',
+            id: 'state',
+            label: 'Clock status',
+            default: 'synced',
+            choices: [
+              { id: 'synced', label: 'Synced' },
+              { id: 'not_synced', label: 'Not synced' },
+            ],
+          },
+        ],
+        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceClockState']['options']>) => {
+          const device = this.devices.get(String(event.options.device))
+          if (!device) return false
+          const isSynced = device.clockStatus === 'SYNC'
+          return String(event.options.state) === 'synced' ? isSynced : device.online && !isSynced
         },
       },
-      deviceMuted: {
-        type: 'boolean', name: 'Dante device is muted', defaultStyle: { bgcolor: combineRgb(160, 80, 0) },
-        options: [{ type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices }],
-        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceMuted']['options']>) =>
-          this.devices.get(String(event.options.device))?.mute === true,
+      deviceMuteState: {
+        type: 'boolean', name: 'Dante device mute status', defaultStyle: { bgcolor: combineRgb(160, 80, 0) },
+        options: [
+          { type: 'dropdown', id: 'device', label: 'Device', default: '', choices: deviceChoices },
+          {
+            type: 'dropdown',
+            id: 'state',
+            label: 'Mute status',
+            default: 'muted',
+            choices: [
+              { id: 'muted', label: 'Muted' },
+              { id: 'unmuted', label: 'Unmuted' },
+            ],
+          },
+        ],
+        callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['deviceMuteState']['options']>) => {
+          const device = this.devices.get(String(event.options.device))
+          if (!device) return false
+          return String(event.options.state) === 'muted' ? device.mute : !device.mute
+        },
       },
       destinationSource: {
-        type: 'boolean', name: 'Destination source matches', defaultStyle: { bgcolor: combineRgb(0, 120, 180) },
+        type: 'boolean', name: 'Destination RX source matches', defaultStyle: { bgcolor: combineRgb(0, 120, 180) },
         options: [
-          { type: 'dropdown', id: 'device', label: 'Destination device', default: '', choices: deviceChoices },
-          { type: 'number', id: 'channel', label: 'Destination RX channel', default: 1, min: 1, max: 128 },
-          { type: 'textinput', id: 'sourceDevice', label: 'Expected source device', default: '' },
-          { type: 'textinput', id: 'sourceChannel', label: 'Expected source channel', default: '' },
+          { type: 'dropdown', id: 'source', label: 'Expected source TX channel', default: '', choices: txChoices },
+          { type: 'dropdown', id: 'destination', label: 'Destination RX channel', default: '', choices: rxChoices },
         ],
         callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['destinationSource']['options']>) => {
-          const d = this.devices.get(String(event.options.device))
-          const ch = d?.rxChannels.find((c) => c.id === Number(event.options.channel))
-          return !!ch && ch.sourceDevice === String(event.options.sourceDevice) && ch.sourceChannel === String(event.options.sourceChannel)
+          return this.isResolvedSourceMatch(String(event.options.destination), String(event.options.source))
         },
       },
       destinationStatus: {
-        type: 'boolean', name: 'Destination status matches', defaultStyle: { bgcolor: combineRgb(0, 120, 180) },
+        type: 'boolean',
+        name: 'Destination RX status matches',
+        defaultStyle: { bgcolor: combineRgb(0, 120, 180) },
         options: [
-          { type: 'dropdown', id: 'device', label: 'Destination device', default: '', choices: deviceChoices },
-          { type: 'number', id: 'channel', label: 'Destination RX channel', default: 1, min: 1, max: 128 },
-          { type: 'textinput', id: 'status', label: 'Expected status', default: 'STATIC' },
+          { type: 'dropdown', id: 'destination', label: 'Destination RX channel', default: '', choices: rxChoices },
+          {
+            type: 'dropdown',
+            id: 'status',
+            label: 'Expected RX status',
+            default: 'STATIC',
+            choices: statusChoices,
+            allowCustom: true,
+            description: 'Matches the live RX status string reported by the Turtle Dante API for the selected destination channel.',
+          },
         ],
         callback: (event: CompanionFeedbackBooleanEvent<Types['feedbacks']['destinationStatus']['options']>) => {
-          const d = this.devices.get(String(event.options.device))
-          const ch = d?.rxChannels.find((c) => c.id === Number(event.options.channel))
-          return !!ch && ch.status === String(event.options.status)
+          return this.isDestinationStatusMatch(String(event.options.destination), String(event.options.status))
         },
       },
     }
@@ -307,8 +416,95 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     this.setVariableValues(values as Partial<Types['variables']>)
   }
 
+  private buildPresetSections(): CompanionPresetSection<Types>[] {
+    const devicePresetIds = [...this.devices.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((device) => `device_status_${device.id}`)
+
+    return [
+      {
+        id: 'general',
+        name: 'General',
+        definitions: ['refresh_inventory'],
+      },
+      {
+        id: 'device_status',
+        name: 'Device Status',
+        definitions: devicePresetIds,
+      },
+    ]
+  }
+
   private buildPresets(): CompanionPresetDefinitions<Types> {
-    return {}
+    const presets: CompanionPresetDefinitions<Types> = {
+      refresh_inventory: {
+        type: 'simple',
+        name: 'Refresh Dante inventory',
+        style: {
+          text: '↻\nREFRESH',
+          size: 18,
+          color: combineRgb(255, 255, 255),
+          bgcolor: combineRgb(0, 105, 170),
+          alignment: 'center:center',
+        },
+        steps: [
+          {
+            down: [{ actionId: 'refresh', options: {} }],
+            up: [],
+          },
+        ],
+        feedbacks: [],
+      },
+    }
+
+    for (const device of [...this.devices.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      presets[`device_status_${device.id}`] = {
+        type: 'simple',
+        name: `${device.name} device status`,
+        style: {
+          text: `●\n${device.name}`,
+          size: 18,
+          color: combineRgb(255, 255, 255),
+          bgcolor: combineRgb(90, 90, 90),
+          alignment: 'center:center',
+        },
+        steps: [
+          {
+            down: [],
+            up: [],
+          },
+        ],
+        feedbacks: [
+          {
+            feedbackId: 'deviceOnlineState',
+            options: { device: device.id, state: 'online' },
+            style: {
+              text: `●\n${device.name}`,
+              bgcolor: combineRgb(0, 160, 0),
+              color: combineRgb(255, 255, 255),
+            },
+          },
+          {
+            feedbackId: 'deviceOnlineState',
+            options: { device: device.id, state: 'offline' },
+            style: {
+              text: `○\n${device.name}`,
+              bgcolor: combineRgb(160, 0, 0),
+              color: combineRgb(255, 255, 255),
+            },
+          },
+          {
+            feedbackId: 'deviceMuteState',
+            options: { device: device.id, state: 'muted' },
+            style: {
+              bgcolor: combineRgb(160, 80, 0),
+            },
+          },
+        ],
+      }
+    }
+
+    return presets
   }
 
   public getConfigFields(): SomeCompanionConfigField[] {
