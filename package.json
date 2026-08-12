@@ -1,6 +1,6 @@
 {
   "name": "companion-module-turtle-dante",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bitfocus Companion module for Turtle Dante controller devices.",
   "license": "MIT",
   "main": "dist/index.js",

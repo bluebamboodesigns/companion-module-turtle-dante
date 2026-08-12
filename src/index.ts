@@ -13,6 +13,7 @@ import {
   type CompanionVariableDefinitions,
   type SomeCompanionConfigField,
 } from '@companion-module/base'
+import { fileURLToPath } from 'node:url'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -22,6 +23,7 @@ import type { DanteDevice, TurtleConfig } from './types.js'
 
 const CACHE_VERSION = 1
 const CACHE_FILE_URL = new URL(`file://${join(homedir(), 'Library', 'Application Support', 'companion-module-turtle-dante', 'cache.json')}`)
+const CACHE_FILE_PATH = fileURLToPath(CACHE_FILE_URL)
 
 interface Types {
   config: TurtleConfig
@@ -71,7 +73,7 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
 
   private async loadCache(): Promise<void> {
     try {
-      const raw = await readFile(CACHE_FILE_URL, 'utf8')
+      const raw = await readFile(CACHE_FILE_PATH, 'utf8')
       const parsed = JSON.parse(raw) as { version?: number; devices?: DanteDevice[] }
       if (parsed.version !== CACHE_VERSION || !Array.isArray(parsed.devices)) return
 
@@ -100,9 +102,9 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     if (signature === this.lastPersistedCache) return
 
     try {
-      await mkdir(dirname(CACHE_FILE_URL.pathname), { recursive: true })
+      await mkdir(dirname(CACHE_FILE_PATH), { recursive: true })
       const serialized = JSON.stringify(payload, null, 2)
-      await writeFile(CACHE_FILE_URL, serialized, 'utf8')
+      await writeFile(CACHE_FILE_PATH, serialized, 'utf8')
       this.lastPersistedCache = signature
     } catch (error) {
       this.log('warn', `Unable to persist Turtle Dante cache: ${error instanceof Error ? error.message : String(error)}`)

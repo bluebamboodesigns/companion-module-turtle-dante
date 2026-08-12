@@ -16,7 +16,7 @@
   "manufacturer": "Turtle",
   "products": ["Dante Controller"],
   "keywords": ["Dante", "audio", "routing", "AES67", "Turtle"],
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "runtime": {
     "type": "node22",
