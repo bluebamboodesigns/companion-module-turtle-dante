@@ -22,17 +22,6 @@ import type { DanteDevice, TurtleConfig } from './types.js'
 
 const CACHE_VERSION = 1
 const CACHE_FILE_URL = new URL(`file://${join(homedir(), 'Library', 'Application Support', 'companion-module-turtle-dante', 'cache.json')}`)
-const REFRESH_ICON_URL = new URL('../assets/icon-refresh.png', import.meta.url)
-const DEVICE_ICON_URL = new URL('../assets/icon-device.png', import.meta.url)
-
-async function loadIconPng64(url: URL): Promise<string> {
-  try {
-    const file = await readFile(url)
-    return file.toString('base64')
-  } catch {
-    return ''
-  }
-}
 
 interface Types {
   config: TurtleConfig
@@ -58,14 +47,11 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
   private polling = false
   private devices = new Map<string, DanteDevice>()
   private controllerOnline = false
-  private refreshIconPng64 = ''
-  private deviceIconPng64 = ''
   private lastPersistedCache = ''
   private lastDefinitionsSignature = ''
 
   public async init(config: TurtleConfig, _isFirstInit: boolean, _secrets: undefined): Promise<void> {
     this.config = config
-    await this.loadAssets()
     await this.loadCache()
     this.defineStaticCapabilities()
     this.updateVariables()
@@ -81,11 +67,6 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
     this.stopPolling()
     await this.persistCache()
     this.api = undefined
-  }
-
-  private async loadAssets(): Promise<void> {
-    if (!this.refreshIconPng64) this.refreshIconPng64 = await loadIconPng64(REFRESH_ICON_URL)
-    if (!this.deviceIconPng64) this.deviceIconPng64 = await loadIconPng64(DEVICE_ICON_URL)
   }
 
   private async loadCache(): Promise<void> {
@@ -550,8 +531,6 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(0, 105, 170),
           alignment: 'center:bottom',
-          png64: this.refreshIconPng64 || undefined,
-          pngalignment: 'center:top',
         },
         steps: [
           {
@@ -573,8 +552,6 @@ export default class TurtleDanteInstance extends InstanceBase<Types> {
           color: combineRgb(255, 255, 255),
           bgcolor: combineRgb(90, 90, 90),
           alignment: 'center:bottom',
-          png64: this.deviceIconPng64 || undefined,
-          pngalignment: 'center:top',
         },
         steps: [
           {
